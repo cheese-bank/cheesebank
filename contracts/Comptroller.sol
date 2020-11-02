@@ -7,7 +7,7 @@ import "./PriceOracle.sol";
 import "./ComptrollerInterface.sol";
 import "./ComptrollerStorage.sol";
 import "./Unitroller.sol";
-import "./Governance/Comp.sol";
+import "./Cheese.sol";
 
 /**
  * @title Compound's Comptroller Contract
@@ -45,7 +45,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     event ActionPaused(string action, bool pauseState);
 
     /// @notice Emitted when an action is paused on a market
-    event ActionPaused(CToken cToken, string action, bool pauseState);
+    event MarketActionPaused(CToken cToken, string action, bool pauseState);
 
     /// @notice Emitted when market comped status is changed
     event MarketComped(CToken cToken, bool isComped);
@@ -54,7 +54,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     event NewCompRate(uint oldCompRate, uint newCompRate);
 
     /// @notice Emitted when a new COMP speed is calculated for a market
-    event CompSpeedUpdated(CToken indexed cToken, uint newSpeed);
+    event CompSpeedUpdated(CToken indexed cToken, uint newSpeed, uint totalUtility, uint utility);
 
     /// @notice Emitted when COMP is distributed to a supplier
     event DistributedSupplierComp(CToken indexed cToken, address indexed supplier, uint compDelta, uint compSupplyIndex);
@@ -63,7 +63,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     event DistributedBorrowerComp(CToken indexed cToken, address indexed borrower, uint compDelta, uint compBorrowIndex);
 
     /// @notice The threshold above which the flywheel transfers COMP, in wei
-    uint public constant compClaimThreshold = 0.001e18;
+    //uint public constant compClaimThreshold = 0.001e18;
+    uint public constant compClaimThreshold = 50000e18;
 
     /// @notice The initial COMP index for a market
     uint224 public constant compInitialIndex = 1e36;
@@ -147,7 +148,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return Error.NO_ERROR;
         }
 
-        if (accountAssets[borrower].length >= maxAssets)  {
+        if (accountAssets[borrower].length >= maxAssets) {
             // no space, cannot join
             return Error.TOO_MANY_ASSETS;
         }
@@ -175,8 +176,9 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
     function exitMarket(address cTokenAddress) external returns (uint) {
         CToken cToken = CToken(cTokenAddress);
         /* Get sender tokensHeld and amountOwed underlying from the cToken */
-        (uint oErr, uint tokensHeld, uint amountOwed, ) = cToken.getAccountSnapshot(msg.sender);
-        require(oErr == 0, "exitMarket: getAccountSnapshot failed"); // semi-opaque error code
+        (uint oErr, uint tokensHeld, uint amountOwed,) = cToken.getAccountSnapshot(msg.sender);
+        require(oErr == 0, "exitMarket: getAccountSnapshot failed");
+        // semi-opaque error code
 
         /* Fail if the sender has a borrow balance */
         if (amountOwed != 0) {
@@ -374,7 +376,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         }
 
         // Keep the flywheel moving
-        Exp memory borrowIndex = Exp({mantissa: CToken(cToken).borrowIndex()});
+        Exp memory borrowIndex = Exp({mantissa : CToken(cToken).borrowIndex()});
         updateCompBorrowIndex(cToken, borrowIndex);
         distributeBorrowerComp(cToken, borrower, borrowIndex, false);
 
@@ -422,7 +424,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         }
 
         // Keep the flywheel moving
-        Exp memory borrowIndex = Exp({mantissa: CToken(cToken).borrowIndex()});
+        Exp memory borrowIndex = Exp({mantissa : CToken(cToken).borrowIndex()});
         updateCompBorrowIndex(cToken, borrowIndex);
         distributeBorrowerComp(cToken, borrower, borrowIndex, false);
 
@@ -487,7 +489,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
         /* The liquidator may not repay more than what is allowed by the closeFactor */
         uint borrowBalance = CToken(cTokenBorrowed).borrowBalanceStored(borrower);
-        (MathError mathErr, uint maxClose) = mulScalarTruncate(Exp({mantissa: closeFactorMantissa}), borrowBalance);
+        (MathError mathErr, uint maxClose) = mulScalarTruncate(Exp({mantissa : closeFactorMantissa}), borrowBalance);
         if (mathErr != MathError.NO_ERROR) {
             return uint(Error.MATH_ERROR);
         }
@@ -716,7 +718,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         uint redeemTokens,
         uint borrowAmount) internal view returns (Error, uint, uint) {
 
-        AccountLiquidityLocalVars memory vars; // Holds all our calculation results
+        AccountLiquidityLocalVars memory vars;
+        // Holds all our calculation results
         uint oErr;
         MathError mErr;
 
@@ -727,18 +730,18 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
             // Read the balances and exchange rate from the cToken
             (oErr, vars.cTokenBalance, vars.borrowBalance, vars.exchangeRateMantissa) = asset.getAccountSnapshot(account);
-            if (oErr != 0) { // semi-opaque error code, we assume NO_ERROR == 0 is invariant between upgrades
+            if (oErr != 0) {// semi-opaque error code, we assume NO_ERROR == 0 is invariant between upgrades
                 return (Error.SNAPSHOT_ERROR, 0, 0);
             }
-            vars.collateralFactor = Exp({mantissa: markets[address(asset)].collateralFactorMantissa});
-            vars.exchangeRate = Exp({mantissa: vars.exchangeRateMantissa});
+            vars.collateralFactor = Exp({mantissa : markets[address(asset)].collateralFactorMantissa});
+            vars.exchangeRate = Exp({mantissa : vars.exchangeRateMantissa});
 
             // Get the normalized price of the asset
             vars.oraclePriceMantissa = oracle.getUnderlyingPrice(asset);
             if (vars.oraclePriceMantissa == 0) {
                 return (Error.PRICE_ERROR, 0, 0);
             }
-            vars.oraclePrice = Exp({mantissa: vars.oraclePriceMantissa});
+            vars.oraclePrice = Exp({mantissa : vars.oraclePriceMantissa});
 
             // Pre-compute a conversion factor from tokens -> ether (normalized price value)
             (mErr, vars.tokensToDenom) = mulExp3(vars.collateralFactor, vars.exchangeRate, vars.oraclePrice);
@@ -806,7 +809,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
          *  seizeTokens = seizeAmount / exchangeRate
          *   = actualRepayAmount * (liquidationIncentive * priceBorrowed) / (priceCollateral * exchangeRate)
          */
-        uint exchangeRateMantissa = CToken(cTokenCollateral).exchangeRateStored(); // Note: reverts on error
+        uint exchangeRateMantissa = CToken(cTokenCollateral).exchangeRateStored();
+        // Note: reverts on error
         uint seizeTokens;
         Exp memory numerator;
         Exp memory denominator;
@@ -873,13 +877,13 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return fail(Error.UNAUTHORIZED, FailureInfo.SET_CLOSE_FACTOR_OWNER_CHECK);
         }
 
-        Exp memory newCloseFactorExp = Exp({mantissa: newCloseFactorMantissa});
-        Exp memory lowLimit = Exp({mantissa: closeFactorMinMantissa});
+        Exp memory newCloseFactorExp = Exp({mantissa : newCloseFactorMantissa});
+        Exp memory lowLimit = Exp({mantissa : closeFactorMinMantissa});
         if (lessThanOrEqualExp(newCloseFactorExp, lowLimit)) {
             return fail(Error.INVALID_CLOSE_FACTOR, FailureInfo.SET_CLOSE_FACTOR_VALIDATION);
         }
 
-        Exp memory highLimit = Exp({mantissa: closeFactorMaxMantissa});
+        Exp memory highLimit = Exp({mantissa : closeFactorMaxMantissa});
         if (lessThanExp(highLimit, newCloseFactorExp)) {
             return fail(Error.INVALID_CLOSE_FACTOR, FailureInfo.SET_CLOSE_FACTOR_VALIDATION);
         }
@@ -910,10 +914,10 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return fail(Error.MARKET_NOT_LISTED, FailureInfo.SET_COLLATERAL_FACTOR_NO_EXISTS);
         }
 
-        Exp memory newCollateralFactorExp = Exp({mantissa: newCollateralFactorMantissa});
+        Exp memory newCollateralFactorExp = Exp({mantissa : newCollateralFactorMantissa});
 
         // Check collateral factor <= 0.9
-        Exp memory highLimit = Exp({mantissa: collateralFactorMaxMantissa});
+        Exp memory highLimit = Exp({mantissa : collateralFactorMaxMantissa});
         if (lessThanExp(highLimit, newCollateralFactorExp)) {
             return fail(Error.INVALID_COLLATERAL_FACTOR, FailureInfo.SET_COLLATERAL_FACTOR_VALIDATION);
         }
@@ -965,13 +969,13 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         }
 
         // Check de-scaled min <= newLiquidationIncentive <= max
-        Exp memory newLiquidationIncentive = Exp({mantissa: newLiquidationIncentiveMantissa});
-        Exp memory minLiquidationIncentive = Exp({mantissa: liquidationIncentiveMinMantissa});
+        Exp memory newLiquidationIncentive = Exp({mantissa : newLiquidationIncentiveMantissa});
+        Exp memory minLiquidationIncentive = Exp({mantissa : liquidationIncentiveMinMantissa});
         if (lessThanExp(newLiquidationIncentive, minLiquidationIncentive)) {
             return fail(Error.INVALID_LIQUIDATION_INCENTIVE, FailureInfo.SET_LIQUIDATION_INCENTIVE_VALIDATION);
         }
 
-        Exp memory maxLiquidationIncentive = Exp({mantissa: liquidationIncentiveMaxMantissa});
+        Exp memory maxLiquidationIncentive = Exp({mantissa : liquidationIncentiveMaxMantissa});
         if (lessThanExp(maxLiquidationIncentive, newLiquidationIncentive)) {
             return fail(Error.INVALID_LIQUIDATION_INCENTIVE, FailureInfo.SET_LIQUIDATION_INCENTIVE_VALIDATION);
         }
@@ -1003,11 +1007,15 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             return fail(Error.MARKET_ALREADY_LISTED, FailureInfo.SUPPORT_MARKET_EXISTS);
         }
 
-        cToken.isCToken(); // Sanity check to make sure its really a CToken
+        cToken.isCToken();
+        // Sanity check to make sure its really a CToken
 
-        markets[address(cToken)] = Market({isListed: true, isComped: false, collateralFactorMantissa: 0});
+        markets[address(cToken)] = Market({isListed : true, isComped : true, collateralFactorMantissa : 0});
 
         _addMarketInternal(address(cToken));
+
+        borrowGuardianPaused[address(cToken)] = true;
+        //stage 1, not allow borrow
 
         emit MarketListed(cToken);
 
@@ -1049,7 +1057,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         require(msg.sender == admin || state == true, "only admin can unpause");
 
         mintGuardianPaused[address(cToken)] = state;
-        emit ActionPaused(cToken, "Mint", state);
+        emit MarketActionPaused(cToken, "Mint", state);
         return state;
     }
 
@@ -1059,7 +1067,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         require(msg.sender == admin || state == true, "only admin can unpause");
 
         borrowGuardianPaused[address(cToken)] = state;
-        emit ActionPaused(cToken, "Borrow", state);
+        emit MarketActionPaused(cToken, "Borrow", state);
         return state;
     }
 
@@ -1108,28 +1116,68 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
         for (uint i = 0; i < allMarkets_.length; i++) {
             CToken cToken = allMarkets_[i];
-            Exp memory borrowIndex = Exp({mantissa: cToken.borrowIndex()});
+            Exp memory borrowIndex = Exp({mantissa : cToken.borrowIndex()});
             updateCompSupplyIndex(address(cToken));
             updateCompBorrowIndex(address(cToken), borrowIndex);
         }
 
-        Exp memory totalUtility = Exp({mantissa: 0});
+        Exp memory borrowTotalUtility = Exp({mantissa : 0});
+        uint borrowAssetCount = 0;
+        Exp memory borrowAverageUtility = Exp({mantissa : 0});
+        //calculate Borrow asset totalUtility
+        if (miningRule == 1) {//mining by borrow
+            for (uint i = 0; i < allMarkets_.length; i++) {
+                CToken cToken = allMarkets_[i];
+                if (markets[address(cToken)].isComped && !borrowGuardianPaused[address(cToken)]) {
+                    Exp memory assetPrice = Exp({mantissa : oracle.getUnderlyingPrice(cToken)});
+                    Exp memory utility = mul_(assetPrice, cToken.totalBorrows());
+                    borrowTotalUtility = add_(borrowTotalUtility, utility);
+                    borrowAssetCount++;
+                }
+            }
+            if (borrowAssetCount > 0) {
+                borrowAverageUtility = div_(borrowTotalUtility, borrowAssetCount);
+            }
+        }
+
+        Exp memory totalUtility = Exp({mantissa : 0});
         Exp[] memory utilities = new Exp[](allMarkets_.length);
         for (uint i = 0; i < allMarkets_.length; i++) {
             CToken cToken = allMarkets_[i];
             if (markets[address(cToken)].isComped) {
-                Exp memory assetPrice = Exp({mantissa: oracle.getUnderlyingPrice(cToken)});
-                Exp memory utility = mul_(assetPrice, cToken.totalBorrows());
+                Exp memory utility;
+                uint buff = miningBuff[address(cToken)];
+                Exp memory price = Exp({mantissa : oracle.getUnderlyingPrice(cToken)});
+                if (buff == 0) buff = 1;
+                if (miningRule == 0) {//mining by supply
+                    //supply * exchange rate = asset balance
+                    Exp memory supply = Exp({mantissa: cToken.totalSupply()});
+                    //Exp memory exchangeRate = Exp({mantissa: cToken.exchangeRateStored()});
+                    uint assetBalance = mul_(cToken.exchangeRateStored(), supply); // div e18
+                    //usd price *  balance = utility
+                    Exp memory realUtility = Exp({mantissa: mul_(assetBalance, price.mantissa)});
+                    utility = mul_(realUtility, buff); //buff
+                } else if (miningRule == 1) {//mining by borrow
+                    if (borrowGuardianPaused[address(cToken)]) {
+                        //averageUtility with in price
+                        utility = mul_(borrowAverageUtility, buff);
+                    } else {
+                        Exp memory realUtility = mul_(price, cToken.totalBorrows());
+                        utility = mul_(realUtility, buff);
+                    }
+                } else {//can't support
+                    revert();
+                }
+
                 utilities[i] = utility;
                 totalUtility = add_(totalUtility, utility);
             }
         }
-
         for (uint i = 0; i < allMarkets_.length; i++) {
             CToken cToken = allMarkets[i];
             uint newSpeed = totalUtility.mantissa > 0 ? mul_(compRate, div_(utilities[i], totalUtility)) : 0;
             compSpeeds[address(cToken)] = newSpeed;
-            emit CompSpeedUpdated(cToken, newSpeed);
+            emit CompSpeedUpdated(cToken, newSpeed, totalUtility.mantissa, utilities[i].mantissa);
         }
     }
 
@@ -1145,11 +1193,11 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         if (deltaBlocks > 0 && supplySpeed > 0) {
             uint supplyTokens = CToken(cToken).totalSupply();
             uint compAccrued = mul_(deltaBlocks, supplySpeed);
-            Double memory ratio = supplyTokens > 0 ? fraction(compAccrued, supplyTokens) : Double({mantissa: 0});
-            Double memory index = add_(Double({mantissa: supplyState.index}), ratio);
+            Double memory ratio = supplyTokens > 0 ? fraction(compAccrued, supplyTokens) : Double({mantissa : 0});
+            Double memory index = add_(Double({mantissa : supplyState.index}), ratio);
             compSupplyState[cToken] = CompMarketState({
-                index: safe224(index.mantissa, "new index exceeds 224 bits"),
-                block: safe32(blockNumber, "block number exceeds 32 bits")
+            index : safe224(index.mantissa, "new index exceeds 224 bits"),
+            block : safe32(blockNumber, "block number exceeds 32 bits")
             });
         } else if (deltaBlocks > 0) {
             supplyState.block = safe32(blockNumber, "block number exceeds 32 bits");
@@ -1168,11 +1216,11 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         if (deltaBlocks > 0 && borrowSpeed > 0) {
             uint borrowAmount = div_(CToken(cToken).totalBorrows(), marketBorrowIndex);
             uint compAccrued = mul_(deltaBlocks, borrowSpeed);
-            Double memory ratio = borrowAmount > 0 ? fraction(compAccrued, borrowAmount) : Double({mantissa: 0});
-            Double memory index = add_(Double({mantissa: borrowState.index}), ratio);
+            Double memory ratio = borrowAmount > 0 ? fraction(compAccrued, borrowAmount) : Double({mantissa : 0});
+            Double memory index = add_(Double({mantissa : borrowState.index}), ratio);
             compBorrowState[cToken] = CompMarketState({
-                index: safe224(index.mantissa, "new index exceeds 224 bits"),
-                block: safe32(blockNumber, "block number exceeds 32 bits")
+            index : safe224(index.mantissa, "new index exceeds 224 bits"),
+            block : safe32(blockNumber, "block number exceeds 32 bits")
             });
         } else if (deltaBlocks > 0) {
             borrowState.block = safe32(blockNumber, "block number exceeds 32 bits");
@@ -1186,8 +1234,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      */
     function distributeSupplierComp(address cToken, address supplier, bool distributeAll) internal {
         CompMarketState storage supplyState = compSupplyState[cToken];
-        Double memory supplyIndex = Double({mantissa: supplyState.index});
-        Double memory supplierIndex = Double({mantissa: compSupplierIndex[cToken][supplier]});
+        Double memory supplyIndex = Double({mantissa : supplyState.index});
+        Double memory supplierIndex = Double({mantissa : compSupplierIndex[cToken][supplier]});
         compSupplierIndex[cToken][supplier] = supplyIndex.mantissa;
 
         if (supplierIndex.mantissa == 0 && supplyIndex.mantissa > 0) {
@@ -1210,8 +1258,8 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      */
     function distributeBorrowerComp(address cToken, address borrower, Exp memory marketBorrowIndex, bool distributeAll) internal {
         CompMarketState storage borrowState = compBorrowState[cToken];
-        Double memory borrowIndex = Double({mantissa: borrowState.index});
-        Double memory borrowerIndex = Double({mantissa: compBorrowerIndex[cToken][borrower]});
+        Double memory borrowIndex = Double({mantissa : borrowState.index});
+        Double memory borrowerIndex = Double({mantissa : compBorrowerIndex[cToken][borrower]});
         compBorrowerIndex[cToken][borrower] = borrowIndex.mantissa;
 
         if (borrowerIndex.mantissa > 0) {
@@ -1233,10 +1281,10 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      */
     function transferComp(address user, uint userAccrued, uint threshold) internal returns (uint) {
         if (userAccrued >= threshold && userAccrued > 0) {
-            Comp comp = Comp(getCompAddress());
-            uint compRemaining = comp.balanceOf(address(this));
-            if (userAccrued <= compRemaining) {
-                comp.transfer(user, userAccrued);
+            Cheese cheese = Cheese(getCheeseAddress());
+            uint cheeseRemaining = cheese.balanceOf(address(this));
+            if (userAccrued <= cheeseRemaining) {
+                cheese.transfer(user, userAccrued);
                 return 0;
             }
         }
@@ -1274,7 +1322,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
             CToken cToken = cTokens[i];
             require(markets[address(cToken)].isListed, "market must be listed");
             if (borrowers == true) {
-                Exp memory borrowIndex = Exp({mantissa: cToken.borrowIndex()});
+                Exp memory borrowIndex = Exp({mantissa : cToken.borrowIndex()});
                 updateCompBorrowIndex(address(cToken), borrowIndex);
                 for (uint j = 0; j < holders.length; j++) {
                     distributeBorrowerComp(address(cToken), holders[j], borrowIndex, true);
@@ -1329,15 +1377,15 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
 
         if (compSupplyState[cToken].index == 0 && compSupplyState[cToken].block == 0) {
             compSupplyState[cToken] = CompMarketState({
-                index: compInitialIndex,
-                block: safe32(getBlockNumber(), "block number exceeds 32 bits")
+            index : compInitialIndex,
+            block : safe32(getBlockNumber(), "block number exceeds 32 bits")
             });
         }
 
         if (compBorrowState[cToken].index == 0 && compBorrowState[cToken].block == 0) {
             compBorrowState[cToken] = CompMarketState({
-                index: compInitialIndex,
-                block: safe32(getBlockNumber(), "block number exceeds 32 bits")
+            index : compInitialIndex,
+            block : safe32(getBlockNumber(), "block number exceeds 32 bits")
             });
         }
     }
@@ -1358,6 +1406,21 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
         refreshCompSpeedsInternal();
     }
 
+    function _setMiningBuff(address cToken, uint buff) public {
+        require(adminOrInitializing(), "only admin can change cheese rate");
+        miningBuff[cToken] = buff;
+    }
+
+    function _changeMiningRule() public {
+        if (msg.sender != admin || miningRule != 0) {
+            return;
+        }
+        /*
+        require(adminOrInitializing(), "only admin can set mining rule");
+        require(miningRule == 0, "only change mining rule from 0 to 1");
+        */
+        miningRule = 1;
+    }
     /**
      * @notice Return all of the markets
      * @dev The automatic getter may be used to access an individual market.
@@ -1375,7 +1438,7 @@ contract Comptroller is ComptrollerV3Storage, ComptrollerInterface, ComptrollerE
      * @notice Return the address of the COMP token
      * @return The address of COMP
      */
-    function getCompAddress() public view returns (address) {
-        return 0xc00e94Cb662C3520282E6f5717214004A7f26888;
+    function getCheeseAddress() public view returns (address) {
+        return 0xc0DdFb59c425E2ca9bCB62a6CC096f0265B28Fff;
     }
 }
