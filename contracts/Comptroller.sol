@@ -7,7 +7,7 @@ import "./PriceOracle.sol";
 import "./ComptrollerInterface.sol";
 import "./ComptrollerStorage.sol";
 import "./Unitroller.sol";
-import "./Cheese.sol";
+import "./Governance/Cheese.sol";
 
 /**
  * @title Compound's Comptroller Contract
