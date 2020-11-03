@@ -112,6 +112,9 @@ contract ComptrollerV3Storage is ComptrollerV2Storage {
     /// @notice The portion of compRate that each market currently receives
     mapping(address => uint) public compSpeeds;
 
+    /// @notice The mining cheese rule, 0 - minting by supply, 1 - minting by borrow
+    uint public miningRule;
+
     /// @notice The COMP market supply state for each market
     mapping(address => CompMarketState) public compSupplyState;
 
@@ -126,6 +129,9 @@ contract ComptrollerV3Storage is ComptrollerV2Storage {
 
     /// @notice The COMP accrued but not yet transferred to each user
     mapping(address => uint) public compAccrued;
+
+    /// @notice The mining CHEESE Buff
+    mapping(address => uint) public miningBuff;
 }
 
 contract ComptrollerV4Storage is ComptrollerV3Storage {

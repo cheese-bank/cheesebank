@@ -8,9 +8,9 @@ contract PriceOracle {
 
     /**
       * @notice Get the underlying price of a cToken asset
-      * @param cToken The cToken to get the underlying price of
+      * @param sToken The cToken to get the underlying price of
       * @return The underlying asset price mantissa (scaled by 1e18).
       *  Zero means the price is unavailable.
       */
-    function getUnderlyingPrice(CToken cToken) external view returns (uint);
+    function getUnderlyingPrice(CToken sToken) external view returns (uint);
 }
